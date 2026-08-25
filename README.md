@@ -4,7 +4,7 @@ A message inspector for MQTT networks. Subscribe to a set of topics, watch messa
 arrive in real time, and open any one of them to read the payload and the packet flags
 the broker delivered.
 
-![Dashboard: message stream, packet inspector, connection and publish controls](docs/screenshots/setup.png)
+![Setup screen: transport picker, broker fields, and the composed broker URL](docs/screenshots/setup.png)
 
 ```bash
 npm install
@@ -61,7 +61,7 @@ wrong port. Connections you use are saved as chips you can click to reload later
 
 **Dashboard.**
 
-![Setup screen: transport picker, broker fields, and the composed broker URL](docs/screenshots/dashboard.png)
+![Dashboard: message stream, packet inspector, connection and publish controls](docs/screenshots/dashboard.png)
 
 - _Left — stream._ Every message as it lands, newest at the bottom, with a time rail that
   marks stretches of silence. Filter by topic or payload text, limit the view to one
