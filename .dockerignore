@@ -1,0 +1,13 @@
+node_modules
+dist
+build
+.git
+.github
+.claude
+*.tsbuildinfo
+*.log
+.DS_Store
+README.md
+CONTRIBUTING.md
+LICENSE
+.env
