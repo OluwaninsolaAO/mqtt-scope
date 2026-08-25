@@ -4,6 +4,8 @@ A message inspector for MQTT networks. Subscribe to a set of topics, watch messa
 arrive in real time, and open any one of them to read the payload and the packet flags
 the broker delivered.
 
+![Dashboard: message stream, packet inspector, connection and publish controls](docs/screenshots/setup.png)
+
 ```bash
 npm install
 npm start
@@ -59,13 +61,15 @@ wrong port. Connections you use are saved as chips you can click to reload later
 
 **Dashboard.**
 
-- *Left — stream.* Every message as it lands, newest at the bottom, with a time rail that
+![Setup screen: transport picker, broker fields, and the composed broker URL](docs/screenshots/dashboard.png)
+
+- _Left — stream._ Every message as it lands, newest at the bottom, with a time rail that
   marks stretches of silence. Filter by topic or payload text, limit the view to one
   subscription, pause to hold the list still (held messages replay when you resume).
-- *Centre — inspector.* Topic broken into levels, arrival time, QoS, retain and duplicate
+- _Centre — inspector._ Topic broken into levels, arrival time, QoS, retain and duplicate
   flags, payload size and packet ID. JSON payloads get a collapsible tree; everything else
   gets text and a hex dump. MQTT 5 user properties appear under Properties when present.
-- *Right — controls.* Edit credentials, reconnect or disconnect, add and drop subscriptions
+- _Right — controls._ Edit credentials, reconnect or disconnect, add and drop subscriptions
   without reconnecting, publish a message, set how many messages to keep, and export the
   buffer as JSON.
 
