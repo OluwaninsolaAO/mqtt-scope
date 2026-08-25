@@ -4,7 +4,7 @@ import MessageList from './components/MessageList';
 import Inspector from './components/Inspector';
 import Tools from './components/Tools';
 import { useBridge, topicMatches } from './lib/useBridge';
-import { loadState, saveState, newProfile, defaultPortFor } from './lib/storage';
+import { loadState, saveState, newProfile, defaultPortFor, isConnectable } from './lib/storage';
 import { base64ToBytes, bytesToText, looksBinary } from './lib/format';
 import type { ConnectionState, Message, Profile, PublishDraft, Settings, StoredState } from './types';
 
@@ -30,12 +30,12 @@ function searchText(message: Message): string {
 
 export default function App(): React.JSX.Element {
   const [store, setStore] = useState<StoredState>(() => loadState());
-  const [draft, setDraft] = useState<Profile>(() => {
-    const state = loadState();
-    const active = state.profiles.find((profile) => profile.id === state.activeId);
-    return active ? { ...active } : newProfile();
-  });
-  const [view, setView] = useState<'setup' | 'dash'>('setup');
+  const active = store.profiles.find((profile) => profile.id === store.activeId);
+  const [draft, setDraft] = useState<Profile>(() => (active ? { ...active } : newProfile()));
+  // A reload lands straight on the dashboard when the last connection can be dialled again.
+  const [view, setView] = useState<'setup' | 'dash'>(() =>
+    store.settings.autoConnect && isConnectable(active) ? 'dash' : 'setup'
+  );
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<Message | null>(null);
   const [query, setQuery] = useState('');
@@ -48,6 +48,12 @@ export default function App(): React.JSX.Element {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => saveState(store), [store]);
+
+  // Only the first render can resume; later trips to the dashboard connect on their own.
+  useEffect(() => {
+    if (view === 'dash') bridge.connect(draft);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const say = useCallback((text: string): void => {
     setToast(text);
@@ -89,6 +95,7 @@ export default function App(): React.JSX.Element {
       return {
         ...prev,
         activeId: profile.id,
+        settings: { ...prev.settings, autoConnect: true },
         profiles: exists
           ? prev.profiles.map((entry) => (entry.id === profile.id ? profile : entry))
           : prev.profiles.concat(profile)
@@ -98,8 +105,10 @@ export default function App(): React.JSX.Element {
     setView('dash');
   }, [draft, bridge]);
 
+  // Disconnecting is a decision to stop, so the next load should not dial back in.
   const handleDisconnect = useCallback((): void => {
     bridge.disconnect();
+    setStore((prev) => ({ ...prev, settings: { ...prev.settings, autoConnect: false } }));
     setView('setup');
   }, [bridge]);
 

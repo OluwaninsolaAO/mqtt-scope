@@ -105,6 +105,14 @@ export default function Tools({
             <input id="tool-client" className="input" readOnly value={profile.clientId} />
           </div>
           <p className="tool-note">{statusDetail || 'No events since connecting.'}</p>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={settings.autoConnect}
+              onChange={(event) => onSettings({ ...settings, autoConnect: event.target.checked })}
+            />
+            Reconnect when this page loads
+          </label>
           <div className="row-actions">
             <button type="button" className="btn small" onClick={onEditConnection}>Edit credentials</button>
             <button type="button" className="btn small" onClick={onReconnect} disabled={status === 'connecting'}>

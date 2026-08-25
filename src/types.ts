@@ -18,6 +18,8 @@ export interface Profile extends BrokerConfig {
 export interface Settings {
   bufferSize: number;
   autoScroll: boolean;
+  /** Reconnect to the last used connection when the page loads. */
+  autoConnect: boolean;
 }
 
 export interface StoredState {

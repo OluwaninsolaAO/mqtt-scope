@@ -59,6 +59,12 @@ composed broker URL at the top updates as you type, which is the quickest way to
 wrong port. Connections you use are saved as chips you can click to reload later; clear the
 "Keep the password in this browser" box to leave the password out of local storage.
 
+Once you have connected, reloading the page goes straight back to the dashboard and
+reconnects — the setup screen only appears when there is nothing to resume. Two things send
+you back to it: pressing Disconnect, or clearing "Reconnect when this page loads" under
+Connection. A saved connection whose password was not kept also lands on setup, since the
+broker would only refuse a blank one.
+
 **Dashboard.**
 
 ![Dashboard: message stream, packet inspector, connection and publish controls](docs/screenshots/dashboard.png)

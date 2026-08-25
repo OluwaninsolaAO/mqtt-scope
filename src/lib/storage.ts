@@ -21,7 +21,19 @@ export const DEFAULT_PROFILE: Profile = {
   topics: [{ topic: '#', qos: 0 }]
 };
 
-export const DEFAULT_SETTINGS: Settings = { bufferSize: 2000, autoScroll: true };
+export const DEFAULT_SETTINGS: Settings = { bufferSize: 2000, autoScroll: true, autoConnect: true };
+
+/**
+ * Whether a saved connection can be dialled without asking the user anything.
+ * A username with no stored password cannot: the broker would just refuse it.
+ */
+export function isConnectable(profile: Profile | undefined): profile is Profile {
+  if (!profile) return false;
+  if (!profile.host.trim()) return false;
+  if (!Number.isInteger(profile.port) || profile.port < 1 || profile.port > 65535) return false;
+  if (!profile.topics.length) return false;
+  return !profile.username || Boolean(profile.password);
+}
 
 function blank(): StoredState {
   return { profiles: [], activeId: null, settings: { ...DEFAULT_SETTINGS } };
