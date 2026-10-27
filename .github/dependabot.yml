@@ -1,0 +1,25 @@
+# Weekly update PRs for every ecosystem this repository might use. An entry
+# whose manifest does not exist is skipped by Dependabot.
+version: 2
+updates:
+  # covers npm, pnpm, yarn and bun lockfiles
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10
+    groups:
+      # one PR for routine minor/patch bumps; majors still arrive one by one
+      minor-and-patch:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directories: ['/', '/.github/actions/*']
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
