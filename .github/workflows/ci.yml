@@ -1,47 +1,244 @@
 name: CI
 
+# Project-agnostic CI for JavaScript/TypeScript repositories. Nothing here names
+# a package, service or script that might not exist: the `detect` job reads the
+# repository and every later job runs only what it finds.
+#
+#   package manager   from the lockfile (pnpm, yarn, bun, npm)
+#   Node version      .nvmrc / .node-version / package.json engines, else LTS
+#   checks            lint, format:check, typecheck, test, build (each only if
+#                     package.json defines it)
+#   Docker            builds ./Dockerfile when there is one
+#   security          secrets (gitleaks), static analysis (Semgrep) and
+#                     dependency/Dockerfile vulnerabilities (Trivy)
+#
+# Vulnerability findings are reported without failing the build until the
+# repository variable SECURITY_BLOCKING is set to "true" (Settings > Secrets and
+# variables > Actions > Variables). Committed secrets always fail.
 on:
-  push:
-    branches: [main]
   pull_request:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
 
+# a newer push to a pull request makes its older run pointless; a push to
+# main or dev never cancels, so every SHA that lands there keeps its result
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CI: true
+  SECURITY_BLOCKING: ${{ vars.SECURITY_BLOCKING == 'true' }}
+  GITLEAKS_IMAGE: zricethezav/gitleaks:v8.21.2
+  TRIVY_IMAGE: ghcr.io/aquasecurity/trivy:0.69.3@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c
+  SEMGREP_IMAGE: semgrep/semgrep:1.177.0@sha256:acaac22ffc7b7cc5926de0751b223bce0b2491c33d18422fa72f632c78d81198
 
 jobs:
-  typecheck:
-    name: Type check and build
+  # What this repository has, so later jobs only run what applies.
+  detect:
+    name: Detect project
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      node: ${{ steps.scan.outputs.node }}
+      scripts: ${{ steps.scan.outputs.scripts }}
+      dockerfile: ${{ steps.scan.outputs.dockerfile }}
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          node-version: '22'
-          cache: npm
+          persist-credentials: false
+      - name: Scan the repository
+        id: scan
+        run: |
+          if [ -f package.json ]; then
+            echo "node=true" >> "$GITHUB_OUTPUT"
+            # scripts worth running in CI; npm's placeholder "no test specified" is not a test
+            scripts=$(node -e '
+              const s = require("./package.json").scripts || {};
+              const wanted = ["lint", "format:check", "typecheck", "test", "build"];
+              const found = wanted.filter(n => s[n] && !/no test specified/.test(s[n]));
+              process.stdout.write(JSON.stringify(found));
+            ')
+          else
+            echo "node=false" >> "$GITHUB_OUTPUT"
+            scripts='[]'
+          fi
+          echo "scripts=$scripts" >> "$GITHUB_OUTPUT"
+          [ -f Dockerfile ] && dockerfile=true || dockerfile=false
+          echo "dockerfile=$dockerfile" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Detected"
+            echo "- package.json: $( [ -f package.json ] && echo yes || echo no )"
+            echo "- scripts run in CI: \`$scripts\`"
+            echo "- Dockerfile: $dockerfile"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Type check
-        run: npm run typecheck
-
+  # Install from the lockfile, then every script package.json defines among
+  # lint, format:check, typecheck, test and build. Installing must not change
+  # any tracked file (an out-of-date lockfile fails here).
+  checks:
+    name: Install, lint, typecheck, test, build
+    needs: detect
+    if: needs.detect.outputs.node == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        id: setup
+      - name: Install left the tree unchanged
+        run: git diff --exit-code
+      - name: Lint
+        if: contains(fromJSON(needs.detect.outputs.scripts), 'lint')
+        run: ${{ steps.setup.outputs.run }} lint
+      - name: Formatting
+        if: contains(fromJSON(needs.detect.outputs.scripts), 'format:check')
+        run: ${{ steps.setup.outputs.run }} format:check
+      - name: Typecheck
+        if: contains(fromJSON(needs.detect.outputs.scripts), 'typecheck')
+        run: ${{ steps.setup.outputs.run }} typecheck
+      - name: Test
+        if: contains(fromJSON(needs.detect.outputs.scripts), 'test')
+        run: ${{ steps.setup.outputs.run }} test
       - name: Build
-        run: npm run build
+        if: contains(fromJSON(needs.detect.outputs.scripts), 'build')
+        run: ${{ steps.setup.outputs.run }} build
 
+  # The image builds; nothing is pushed.
   docker:
     name: Docker image builds
+    needs: detect
+    if: needs.detect.outputs.dockerfile == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: docker/setup-buildx-action@v3
-
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           push: false
+          load: true
+          tags: ci/image:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Save image for scanning
+        run: |
+          mkdir -p "$RUNNER_TEMP/image"
+          docker save "ci/image:${{ github.sha }}" -o "$RUNNER_TEMP/image/image.tar"
+      # the image goes to Trivy as a tarball, so Trivy never sees the Docker socket
+      - name: Scan image for vulnerabilities
+        continue-on-error: ${{ env.SECURITY_BLOCKING != 'true' }}
+        run: |
+          docker run --rm -v "$RUNNER_TEMP/image:/image:ro" "$TRIVY_IMAGE" image \
+            --input /image/image.tar --scanners vuln \
+            --severity HIGH,CRITICAL --ignore-unfixed \
+            --exit-code 1
+
+  # Committed secrets anywhere in history. Uses .gitleaks.toml when the
+  # repository has one, gitleaks' default rules otherwise.
+  secrets:
+    name: Secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # the container runs as root over a checkout owned by the runner user, and
+      # git refuses that without being told the directory is safe
+      - name: Scan for committed secrets
+        run: |
+          config=""
+          [ -f .gitleaks.toml ] && config="--config /repo/.gitleaks.toml"
+          docker run --rm -v "$PWD:/repo" -w /repo --entrypoint sh "$GITLEAKS_IMAGE" -c \
+            "git config --global --add safe.directory /repo && gitleaks detect --source /repo $config --redact --verbose"
+
+  # Known-vulnerable dependencies (every lockfile in the tree, dev tools
+  # included) and misconfiguration in Dockerfiles and other IaC. Trivy runs as
+  # a digest-pinned image rather than through its GitHub actions.
+  vulnerabilities:
+    name: Dependency and config vulnerabilities
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Scan dependencies
+        continue-on-error: ${{ env.SECURITY_BLOCKING != 'true' }}
+        run: |
+          docker run --rm -v "$PWD:/src:ro" -w /src "$TRIVY_IMAGE" fs \
+            --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+            --exit-code 1 .
+      - name: Scan Dockerfiles and IaC
+        continue-on-error: ${{ env.SECURITY_BLOCKING != 'true' }}
+        run: |
+          docker run --rm -v "$PWD:/src:ro" -w /src "$TRIVY_IMAGE" config \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 .
+      # needs the dependency graph enabled in the repository settings (private
+      # repositories also need GitHub Advanced Security); reports without
+      # blocking until then
+      - name: Review dependency changes
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4.9.0
+        with:
+          fail-on-severity: high
+
+  # Static analysis with Semgrep's open-source engine and its language-agnostic
+  # default rule pack. A pull request fails on findings it introduces (existing
+  # ones are left to the base commit); a push fails on ERROR-level findings.
+  sast:
+    name: Semgrep
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan
+        run: |
+          if [ -n "$BASE_SHA" ]; then
+            scope="--baseline-commit $BASE_SHA"
+          else
+            scope="--severity ERROR"
+          fi
+          docker run --rm -v "$PWD:/src" -w /src "$SEMGREP_IMAGE" sh -c \
+            "git config --global --add safe.directory /src && semgrep scan \
+              --config p/default --metrics=off --error $scope"
+
+  # One status to require in branch protection. A job skipped because the
+  # repository has nothing for it (no package.json, no Dockerfile) passes;
+  # a failed or cancelled job fails the gate.
+  gate:
+    name: CI gate
+    if: always()
+    needs: [detect, checks, docker, secrets, vulnerabilities, sast]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every job succeeded or did not apply
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          failed=$(echo "$NEEDS" | jq -r '[to_entries[] | select(.value.result == "failure" or .value.result == "cancelled") | .key] | join(", ")')
+          if [ -n "$failed" ]; then
+            echo "::error::Failed: $failed"
+            exit 1
+          fi

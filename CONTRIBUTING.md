@@ -42,9 +42,11 @@ pull a lot of traffic, and the Publish panel writes for real.
 npm run typecheck
 ```
 
-That builds all three TypeScript projects (browser, bridge, Vite config). CI runs the same
-command plus a full build and a Docker image build, so a green local run usually means a
-green pipeline.
+That builds all three TypeScript projects (browser, bridge, Vite config). CI runs every
+`lint`, `format:check`, `typecheck`, `test` and `build` script `package.json` defines, plus a
+Docker image build, so a green local run usually means a green pipeline. It also scans for
+committed secrets (always blocking), static-analysis findings, and vulnerable dependencies
+(reported only, until the repository variable `SECURITY_BLOCKING` is set to `true`).
 
 Include a screenshot for anything that changes the interface. It is the fastest way to
 review a layout change, and the reason most UI pull requests stall is that nobody can

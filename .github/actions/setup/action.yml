@@ -1,0 +1,92 @@
+name: Set up workspace
+description: >-
+  Detects the package manager from the lockfile (pnpm, yarn, bun or npm), sets
+  up Node with a dependency cache, and installs without changing the lockfile.
+  Works for any JavaScript/TypeScript project with no configuration.
+
+inputs:
+  node-version:
+    description: Node version to use. Empty reads .nvmrc / .node-version / package.json engines, falling back to LTS.
+    required: false
+    default: ''
+  working-directory:
+    description: Directory holding package.json
+    required: false
+    default: '.'
+
+outputs:
+  package-manager:
+    description: npm, pnpm, yarn or bun
+    value: ${{ steps.detect.outputs.pm }}
+  run:
+    description: Command prefix for running a package.json script (e.g. "npm run")
+    value: ${{ steps.detect.outputs.run }}
+
+runs:
+  using: composite
+  steps:
+    - name: Detect package manager and Node version
+      id: detect
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        NODE_INPUT: ${{ inputs.node-version }}
+      run: |
+        if   [ -f pnpm-lock.yaml ];                    then pm=pnpm; run="pnpm run"; lock=pnpm-lock.yaml
+        elif [ -f yarn.lock ];                         then pm=yarn; run="yarn run"; lock=yarn.lock
+        elif [ -f bun.lockb ] || [ -f bun.lock ];      then pm=bun;  run="bun run";  lock=$(ls bun.lock* | head -1)
+        else                                                pm=npm;  run="npm run";  lock=package-lock.json
+        fi
+
+        node_file=""
+        node_version="$NODE_INPUT"
+        if [ -z "$node_version" ]; then
+          if   [ -f .nvmrc ];         then node_file=.nvmrc
+          elif [ -f .node-version ];  then node_file=.node-version
+          else
+            node_version=$(node -e "try{const e=require('./package.json').engines;process.stdout.write((e&&e.node)||'')}catch{}" 2>/dev/null || true)
+            [ -n "$node_version" ] || node_version=lts/*
+          fi
+        fi
+
+        {
+          echo "pm=$pm"
+          echo "run=$run"
+          echo "lock=$lock"
+          echo "node-file=$node_file"
+          echo "node-version=$node_version"
+        } >> "$GITHUB_OUTPUT"
+        echo "Package manager: $pm (lockfile: $lock)"
+
+    # pnpm and yarn berry come from the "packageManager" field when present;
+    # corepack honours it, so the version matches what developers use
+    - name: Enable corepack
+      if: steps.detect.outputs.pm == 'pnpm' || steps.detect.outputs.pm == 'yarn'
+      shell: bash
+      run: |
+        npm install -g corepack@latest >/dev/null
+        corepack enable
+        echo COREPACK_ENABLE_DOWNLOAD_PROMPT=0 >> "$GITHUB_ENV"
+
+    - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      if: steps.detect.outputs.pm == 'bun'
+
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      with:
+        node-version: ${{ steps.detect.outputs.node-version }}
+        node-version-file: ${{ steps.detect.outputs.node-file && format('{0}/{1}', inputs.working-directory, steps.detect.outputs.node-file) || '' }}
+        cache: ${{ steps.detect.outputs.pm != 'bun' && steps.detect.outputs.pm || '' }}
+        cache-dependency-path: ${{ format('{0}/{1}', inputs.working-directory, steps.detect.outputs.lock) }}
+
+    - name: Install (frozen lockfile)
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PM: ${{ steps.detect.outputs.pm }}
+      run: |
+        case "$PM" in
+          pnpm) pnpm install --frozen-lockfile ;;
+          yarn) if yarn --version | grep -q '^1\.'; then yarn install --frozen-lockfile; else yarn install --immutable; fi ;;
+          bun)  bun install --frozen-lockfile ;;
+          npm)  if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then npm ci; else npm install --no-audit --no-fund; fi ;;
+        esac
