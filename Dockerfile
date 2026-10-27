@@ -1,5 +1,5 @@
 # ---- build the interface and compile the bridge ----
-FROM node:22-slim AS build
+FROM node:25-slim AS build
 WORKDIR /app
 
 COPY package.json package-lock.json ./
@@ -13,7 +13,7 @@ COPY src ./src
 RUN npm run build
 
 # ---- runtime ----
-FROM node:22-slim AS runtime
+FROM node:25-slim AS runtime
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=8787
