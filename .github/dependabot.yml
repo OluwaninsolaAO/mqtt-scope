@@ -7,6 +7,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # wait a week before proposing a new release, so broken or malicious
+    # publishes are usually caught and pulled first
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 10
     groups:
       # one PR for routine minor/patch bumps; majors still arrive one by one
@@ -16,6 +20,8 @@ updates:
     directories: ['/', '/.github/actions/*']
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     groups:
       actions:
         patterns: ['*']
@@ -23,3 +29,5 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
